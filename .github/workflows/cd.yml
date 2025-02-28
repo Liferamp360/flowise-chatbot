@@ -1,0 +1,73 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches:
+      - dev
+      - prod
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+
+jobs:
+
+  validate-env:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate environment
+        run: |
+          required_vars=(AWS_DEFAULT_REGION AWS_ACCOUNT_ID AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY)
+          for var in "${required_vars[@]}"; do
+            if [ -z "${!var}" ]; then
+              echo "Error: $var is not set"
+              exit 1
+            fi
+          done
+
+  build-flowise:
+    needs: ['validate-env']
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - id: get_branch
+        run: echo "branch_name=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+      - name: Build and push image to ECR
+        run: |
+          ENVIRONMENT=${{ env.branch_name }}
+          npx tsx .github/ci-util.ts \
+            build \
+            --dockerfile_path Dockerfile \
+            --build_dir . \
+            --app_name flowise-chatbot \
+            --env $ENVIRONMENT \
+            --region $AWS_DEFAULT_REGION \
+            --account $AWS_ACCOUNT_ID
+
+  deploy-flowise:
+    needs: ['build-flowise']
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - id: get_branch
+        run: echo "branch_name=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+      - name: Deploy app to ECS
+        run: |
+          ENVIRONMENT=${{ env.branch_name }}
+          npx tsx .github/ci-util.ts \
+            deploy \
+            --stack_dir .aws \
+            --app_name flowise-chatbot \
+            --env $ENVIRONMENT \
+            --region $AWS_DEFAULT_REGION \
+            --account $AWS_ACCOUNT_ID 
