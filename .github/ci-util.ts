@@ -160,8 +160,19 @@ const Cloudformation = {
     const stackName = `${env}-service-${appName}`;
 
     // console.log('Loading params for', packageName
-    const parametersJson = JSON.parse(await fs.promises.readFile(`${stackDir}/parameters/${env}.json`, 'utf-8')).Parameters;
-    const parameters = Object.keys(parametersJson).map(key => `${key}=${parametersJson[key]}`);
+    const parameters: string[] = [];
+    const parametersFilePath = `${stackDir}/parameters/${env}.json`;
+    if (fs.existsSync(parametersFilePath)) {
+      const parametersJson = JSON.parse(await fs.promises.readFile(`${stackDir}/parameters/${env}.json`, 'utf-8')).Parameters;
+      if (!parametersJson) {
+        throw new Error(`No Parameters key found in ${parametersFilePath}`);
+      }
+      Object.keys(parametersJson).forEach(key => {
+        parameters.push(`${key}=${parametersJson[key]}`);
+      });
+    } else {
+      console.log('No parameters file found for', env, parametersFilePath);
+    }
     parameters.push(`AppName=${appName}`);
     parameters.push(`EnvironmentName=${env}`);
     try {
