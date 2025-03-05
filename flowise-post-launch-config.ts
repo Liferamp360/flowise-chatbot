@@ -4,22 +4,9 @@ import path from 'path';
 
 // Configuration parameters (from environment variables)
 const FLOWISE_HOST = process.env.FLOWISE_HOST || 'http://localhost:3000';
-const FLOWISE_USERNAME = process.env.FLOWISE_USERNAME || 'admin';
-const FLOWISE_PASSWORD = process.env.FLOWISE_PASSWORD || 'password';
+const FLOWISE_HEALTH_API = `${process.env.FLOWISE_HOST}/api/v1/ping`;
+
 const FLOWS_DIRECTORY = process.env.FLOWS_DIRECTORY || './flows';
-const API_KEY_NAME = process.env.API_KEY_NAME || 'production-api-key';
-const API_KEY_DESCRIPTION = process.env.API_KEY_DESCRIPTION || 'Automatically generated API key';
-const API_KEY_EXPIRY = parseInt(process.env.API_KEY_EXPIRY || '0', 10); // 0 = no expiry
-
-interface AuthResponse {
-  accessToken: string;
-}
-
-interface ApiKeyResponse {
-  id: string;
-  apiKey: string;
-  keyName: string;
-}
 
 interface FlowResponse {
   id: string;
@@ -31,7 +18,7 @@ async function waitForFlowiseReady(): Promise<void> {
   
   while (true) {
     try {
-      await axios.head(FLOWISE_HOST);
+      await axios.head(FLOWISE_HEALTH_API);
       console.log('Flowise is up!');
       return;
     } catch (error) {
@@ -41,54 +28,9 @@ async function waitForFlowiseReady(): Promise<void> {
   }
 }
 
-async function getAuthToken(): Promise<string> {
+async function getCurrentFlows(): Promise<string[]> {
   try {
-    const response = await axios.post<AuthResponse>(`${FLOWISE_HOST}/api/v1/user/login`, {
-      username: FLOWISE_USERNAME,
-      password: FLOWISE_PASSWORD
-    });
-    
-    return response.data.accessToken;
-  } catch (error) {
-    console.error('Authentication failed:', error.response?.data || error.message);
-    throw new Error('Failed to authenticate with Flowise');
-  }
-}
-
-async function createApiKey(token: string): Promise<string> {
-  try {
-    console.log('Creating API key...');
-    
-    const response = await axios.post<ApiKeyResponse>(
-      `${FLOWISE_HOST}/api/v1/apikey`,
-      {
-        keyName: API_KEY_NAME,
-        description: API_KEY_DESCRIPTION,
-        expirationDate: API_KEY_EXPIRY
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      }
-    );
-    
-    console.log(`API key created with name: ${response.data.keyName}`);
-    return response.data.apiKey;
-  } catch (error) {
-    console.error('API key creation failed:', error.response?.data || error.message);
-    throw new Error('Failed to create API key');
-  }
-}
-
-async function getCurrentFlows(token: string): Promise<string[]> {
-  try {
-    const response = await axios.get<FlowResponse[]>(`${FLOWISE_HOST}/api/v1/chatflows`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
+    const response = await axios.get<FlowResponse[]>(`${FLOWISE_HOST}/api/v1/chatflows`);
     return response.data.map(flow => flow.id);
     } catch (error) {
     console.error('Failed to get current flows:', error.response?.data || error.message);
@@ -96,7 +38,7 @@ async function getCurrentFlows(token: string): Promise<string[]> {
   }
 }
 
-async function importFlow(token: string, flowPath: string): Promise<string> {
+async function importFlow(flowPath: string): Promise<string> {
   try {
     const flowName = path.basename(flowPath, '.json');
     console.log(`Importing flow: ${flowName}`);
@@ -108,16 +50,15 @@ async function importFlow(token: string, flowPath: string): Promise<string> {
     const response = await axios.post<FlowResponse>(
       `${FLOWISE_HOST}/api/v1/chatflows`,
       {
+        name: flowName,
         flowData,
         deployed: true,
         isPublic: true,
-        name: flowName,
         type: 'CHATFLOW'
       },
       {
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Content-Type': 'application/json'
         }
       }
     );
@@ -126,7 +67,7 @@ async function importFlow(token: string, flowPath: string): Promise<string> {
     console.log(`Flow ${flowName} imported successfully with ID: ${flowId}`);
     
     return flowId;
-  } catch (error) {
+  } catch (error: any) {
     console.error(`Flow import failed for ${flowPath}:`, error.response?.data || error.message);
     throw new Error(`Failed to import flow: ${flowPath}`);
   }
@@ -139,17 +80,9 @@ async function main() {
     await waitForFlowiseReady();
     console.log('Flowise is ready');
     
-    // Authenticate and get token
-    const token = await getAuthToken();
+    // Check current flows
+    await getCurrentFlows();
     console.log('Authentication successful');
-    
-    // Create API key
-    const apiKey = await createApiKey(token);
-    console.log('API key created');
-    
-    // Store API key in a file for other processes to use if needed
-    fs.writeFileSync('./api_key.txt', apiKey);
-    console.log('API key stored in api_key.txt');
     
     // Import and deploy all flow configurations
     console.log('Importing flows...');
@@ -170,7 +103,7 @@ async function main() {
     // Import and deploy each flow
     for (const flowFile of flowFiles) {
       try {
-        const flowId = await importFlow(token, flowFile);
+        const flowId = await importFlow(flowFile);
         console.log(`Flow ${flowFile} imported with ID ${flowId}`);
       } catch (error: any) {
         console.error(`Error processing flow ${flowFile}:`, error.message);

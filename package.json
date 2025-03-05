@@ -17,16 +17,12 @@
         "start": "run-script-os",
         "start:windows": "cd packages/server/bin && run start",
         "start:default:old": "cd packages/server/bin && ./run start",
-        "start:default": "npm run start-flowise & sleep 2 && npm run configure",
+        "start:default": "npm run start-flowise & npm run configure",
         "start-worker": "run-script-os",
         "start-worker:windows": "cd packages/server/bin && run worker",
         "start-worker:default": "cd packages/server/bin && ./run worker",
-
-
         "start-flowise": "cd packages/server/bin && ./run start",
         "configure": "npx tsx flowise-post-launch-config.ts",
-
-
         "clean": "pnpm --filter \"./packages/**\" clean",
         "nuke": "pnpm --filter \"./packages/**\" nuke && rimraf node_modules .turbo",
         "format": "prettier --write \"**/*.{ts,tsx,md}\"",
@@ -126,5 +122,8 @@
                 }
             ]
         ]
+    },
+    "dependencies": {
+        "flowise-sdk": "^1.0.9"
     }
 }
