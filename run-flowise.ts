@@ -1,10 +1,11 @@
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
 
 // Configuration parameters (from environment variables)
 const FLOWISE_HOST = process.env.FLOWISE_HOST || 'http://localhost:3000';
-const FLOWISE_HEALTH_API = `${process.env.FLOWISE_HOST}/api/v1/ping`;
+const FLOWISE_HEALTH_API = `${FLOWISE_HOST}/api/v1/ping`;
 
 const FLOWS_DIRECTORY = process.env.FLOWS_DIRECTORY || './flows';
 
@@ -13,24 +14,67 @@ interface FlowResponse {
   name: string;
 }
 
+async function launchFlowise() {
+  console.log('Starting Flowise...');
+  const child = spawn('sh', ['-c', 'cd packages/server/bin && ./run start'], {
+    detached: true,
+    stdio: 'ignore'
+  });
+  child.unref();
+  
+}
+
 async function waitForFlowiseReady(): Promise<void> {
   console.log('Waiting for Flowise to be ready...');
-  
-  while (true) {
+
+  let numTries = 0;
+  const maxTries = 20;
+  let mostRecentError: any = null;
+  while (numTries < maxTries) {
     try {
+      console.log('Checking Flowise health...', FLOWISE_HEALTH_API);
       await axios.head(FLOWISE_HEALTH_API);
       console.log('Flowise is up!');
       return;
     } catch (error) {
       process.stdout.write('.');
+      mostRecentError = error;
+      // console.error(error);
       await new Promise(resolve => setTimeout(resolve, 5000));
     }
   }
+  console.error('Flowise did not start in time:', mostRecentError);
 }
 
-async function getCurrentFlows(): Promise<string[]> {
+async function loadApiKey() {
   try {
-    const response = await axios.get<FlowResponse[]>(`${FLOWISE_HOST}/api/v1/chatflows`);
+    const keyToUse = JSON.parse(fs.readFileSync('packages/server/api.json', 'utf-8'))[0];
+    console.log('API Key loaded:', keyToUse.keyName);
+    return keyToUse.apiKey;
+  } catch (error) {
+    console.error('Failed to load API key:', error.message);
+    throw new Error('Failed to load API key');
+  }
+}
+
+// async function createApiKey() {
+//   try {
+//     const response = await axios.post(`${FLOWISE_HOST}/api/v1/apikeys`, { name: 'default' });
+//     console.log('API Key created:', response.data);
+//     return response.data[0].apiKey;
+//   } catch (error) {
+//     console.error('Failed to create API key:', error.response?.data || error.message);
+//     throw new Error('Failed to create API key');
+//   }
+// }
+
+async function getCurrentFlows(token: string): Promise<string[]> {
+  try {
+    const response = await axios.get<FlowResponse[]>(`${FLOWISE_HOST}/api/v1/chatflows`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
     return response.data.map(flow => flow.id);
     } catch (error) {
     console.error('Failed to get current flows:', error.response?.data || error.message);
@@ -38,13 +82,13 @@ async function getCurrentFlows(): Promise<string[]> {
   }
 }
 
-async function importFlow(flowPath: string): Promise<string> {
+async function importFlow(token: string, flowPath: string): Promise<string> {
   try {
     const flowName = path.basename(flowPath, '.json');
     console.log(`Importing flow: ${flowName}`);
     
     // Read flow configuration
-    const flowData = JSON.parse(fs.readFileSync(flowPath, 'utf-8'));
+    const flowData = fs.readFileSync(flowPath, 'utf-8');
     
     // Import the flow
     const response = await axios.post<FlowResponse>(
@@ -58,7 +102,8 @@ async function importFlow(flowPath: string): Promise<string> {
       },
       {
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         }
       }
     );
@@ -75,14 +120,23 @@ async function importFlow(flowPath: string): Promise<string> {
 
 async function main() {
   try {
+
+    // Start Flowise
+    console.log('Starting Flowise...');
+    await launchFlowise();
+    console.log('Flowise started');
+
     // Wait for Flowise to be ready
-    console.log('Starting Flowise configuration...');
+    console.log('Waiting for Flowise to be ready...');
     await waitForFlowiseReady();
     console.log('Flowise is ready');
+
+    const apikey = await loadApiKey();
+    console.log('API Key loaded successfully');
     
     // Check current flows
-    await getCurrentFlows();
-    console.log('Authentication successful');
+    const currentFlows = await getCurrentFlows(apikey);
+    console.log('Current flows:', currentFlows);
     
     // Import and deploy all flow configurations
     console.log('Importing flows...');
@@ -103,7 +157,7 @@ async function main() {
     // Import and deploy each flow
     for (const flowFile of flowFiles) {
       try {
-        const flowId = await importFlow(flowFile);
+        const flowId = await importFlow(apikey, flowFile);
         console.log(`Flow ${flowFile} imported with ID ${flowId}`);
       } catch (error: any) {
         console.error(`Error processing flow ${flowFile}:`, error.message);
@@ -114,9 +168,18 @@ async function main() {
     console.log('Flowise configuration complete!');
   } catch (error: any) {
     console.error('Startup script failed:', error.message);
-    process.exit(1);
+    // process.exit(1);
   }
 }
 
 // Run the main function
-main();
+main()
+.then(() => {
+
+  // Keep the script running
+  setInterval(() => {}, 1000);
+})
+.catch(error => {
+  console.error('Flowise start script failed:', error.message);
+  process.exit(1);
+});
