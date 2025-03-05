@@ -27,7 +27,9 @@
         "lint-fix": "pnpm lint --fix",
         "quick": "pretty-quick --staged",
         "postinstall": "husky install",
-        "migration:create": "pnpm typeorm migration:create"
+        "migration:create": "pnpm typeorm migration:create",
+        "docker:build": "docker build -t flowise .",
+        "docker:run": "docker run -p 3000:3000 flowise"
     },
     "lint-staged": {
         "*.{js,jsx,ts,tsx,json,md}": "eslint --fix"
